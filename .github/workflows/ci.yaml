@@ -1,0 +1,93 @@
+name: "Terraform Deployment via OIDC"
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  id-token: write   # Required to fetch the OIDC token
+  contents: read    # Required to checkout the code
+
+jobs:
+  terraform:
+    name: "Terraform Plan & Apply"
+    runs-on: ubuntu-latest
+
+    env:
+      AWS_REGION: "ap-southeast-4"
+      ROLE_TO_ASSUME: "arn:aws:iam::096966628706:role/github-actions-terraform-cicd-role" # Replace with your Role ARN
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      # ==========================================
+      # 1. TFLint (Code Quality & Style Checks)
+      # ==========================================
+      - name: Setup TFLint
+        uses: terraform-linters/setup-tflint@v4
+        with:
+          tflint_version: latest
+
+      - name: Init TFLint
+        run: tflint --init
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Run TFLint
+        run: tflint -f compact
+
+      # ==========================================
+      # 2. Trivy (Security Misconfiguration Scan)
+      # ==========================================
+      - name: Run Trivy Security Scan
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: 'config'
+          scan-ref: '.'
+          exit-code: '1' # Fails the pipeline if issues are found
+          ignore-unfixed: true
+          severity: 'HIGH,CRITICAL'
+
+
+      # ========================================== 
+      # 3. Authenticate with AWS via OIDC
+      # ==========================================
+      - name: Configure AWS Credentials via OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ env.ROLE_TO_ASSUME }}
+          aws-region: ${{ env.AWS_REGION }}
+          role-session-name: GitHubActionsTerraformSession
+
+  
+      # ========================================== 
+      # 4. Verify Authentication Context
+      # ==========================================
+      - name: Check AWS Caller Identity
+        run: aws sts get-caller-identity
+
+      # ========================================== 
+      # 5. Setup Terraform
+      # ==========================================
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.7.0"
+
+      # ========================================== 
+      # 6. Terraform Commands
+      # ==========================================
+      - name: Terraform Init
+        run: terraform init
+
+      - name: Terraform Plan
+        run: terraform plan -no-color
+
+      - name: Terraform Apply
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        run: terraform apply -auto-approve
