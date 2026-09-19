@@ -5,8 +5,8 @@ on:
     branches:
       - main
   pull_request:
-    branches:
-      - main
+    branches-ignore:
+      - dev
 
 permissions:
   id-token: write   # Required to fetch the OIDC token
