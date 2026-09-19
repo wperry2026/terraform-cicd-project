@@ -13,7 +13,7 @@ resource "aws_vpc" "xfusion_vpc" {
 resource "aws_subnet" "xfusion_subnet" {
   vpc_id            = aws_vpc.xfusion_vpc.id
   cidr_block        = var.subnet_cidr
-  availability_zone = "us-east-1a"
+  availability_zone = "ap-southeast-4a"
 
   # Explicit dependency declaration
   depends_on = [
