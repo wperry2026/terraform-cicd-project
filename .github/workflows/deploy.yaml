@@ -4,6 +4,10 @@ on:
   push:
     branches:
       - main
+  pull_request:
+    branches: 
+      - main
+      - dev
 
 permissions:
   id-token: write   # Required for AWS OIDC authentication
@@ -40,8 +44,8 @@ jobs:
         id: tflint
         if: github.event_name == 'pull_request'
         run: |
-          # Capture output and exit code without stopping bash immediately
-          TFLINT_OUT=$(tflint -f compact) || EXIT_CODE=$?
+          TFLINT_EXIT=0
+          TFLINT_OUT=$(tflint -f compact) \vert{}\vert{} TFLINT_EXIT=$?
           
           if [ -z "$TFLINT_OUT" ]; then
             TFLINT_OUT="✅ No issues found by TFLint."
@@ -51,39 +55,31 @@ jobs:
           echo "$TFLINT_OUT" >> $GITHUB_ENV
           echo "EOF" >> $GITHUB_ENV
 
-          # Explicitly fail the step if tflint returned an error
-          if [ "${EXIT_CODE:-0}" -ne 0 ]; then
-            echo "❌ TFLint detected issues."
-            exit $EXIT_CODE
-          fi
+          echo "TFLINT_EXIT_CODE=$TFLINT_EXIT" >> $GITHUB_ENV
 
       # ==========================================
       # 2. Trivy Output Capture
       # ==========================================
       - name: Run Trivy Security Scan
         id: trivy
-        if: github.event_name == 'pull_request'
+        if: always() && github.event_name == 'pull_request'
         run: |
-          # 1. Run Trivy and capture exit status without stopping bash immediately
-          TRIVY_EXIT_CODE=0
-          npx --yes trivy config . --severity HIGH,CRITICAL --format table --output trivy-report.txt || TRIVY_EXIT_CODE=$?
+          # Install official Trivy binary
+          curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh -s -- -b /usr/local/bin
           
-          # 2. Read output into variable for PR comment  
+          TRIVY_EXIT=0
+          trivy config . --severity HIGH,CRITICAL --format table --output trivy-report.txt || TRIVY_EXIT=$?
+          
           TRIVY_OUT=$(cat trivy-report.txt 2>/dev/null || true)
           if [ -z "$TRIVY_OUT" ]; then
             TRIVY_OUT="✅ No HIGH or CRITICAL security vulnerabilities detected."
           fi
-
-          # 3. Store report in environment variable
+          
           echo "TRIVY_OUTPUT<<EOF" >> $GITHUB_ENV
           echo "$TRIVY_OUT" >> $GITHUB_ENV
           echo "EOF" >> $GITHUB_ENV
 
-          # 4. Fail the step if Trivy found vulnerabilities
-          if [ $TRIVY_EXIT_CODE -ne 0 ]; then
-            echo "❌ Trivy found HIGH or CRITICAL vulnerabilities."
-            exit $TRIVY_EXIT_CODE
-          fi
+          echo "TRIVY_EXIT_CODE=$TRIVY_EXIT" >> $GITHUB_ENV
 
       # ==========================================
       # 3. AWS OIDC Setup
@@ -108,34 +104,26 @@ jobs:
 
       - name: Terraform Plan
         id: plan
-        if: github.event_name == 'pull_request'
+        if: always() && github.event_name == 'pull_request'
         run: |
-          # 1. Capture plan stdout & stderr without halting bash immediately
-          PLAN_EXIT_CODE=0
-          PLAN_RAW=$(terraform plan -no-color -out=tfplan 2>&1) || PLAN_EXIT_CODE=$?
+          PLAN_EXIT=0
+          PLAN_RAW=$(terraform plan -no-color -out=tfplan 2>&1) \vert{}\vert{} PLAN_EXIT=$?
 
-          # 2. Format output depending on success or failure
-          if [ $PLAN_EXIT_CODE -eq 0 ]; then
+          if [ $PLAN_EXIT -eq 0 ]; then
             PLAN_OUTPUT=$(terraform show -no-color tfplan)
           else
             PLAN_OUTPUT="❌ Terraform Plan Failed:\n\n$PLAN_RAW"
           fi
 
-          # 3. Truncate if output exceeds character limits
           if [ ${#PLAN_OUTPUT} -gt 40000 ]; then
             PLAN_OUTPUT="${PLAN_OUTPUT:0:40000}\n...\n(Plan output truncated due to size limit)"
           fi
 
-          # 4. Store output for the github-script comment step
           echo "PLAN_OUTPUT<<EOF" >> $GITHUB_ENV
           echo "$PLAN_OUTPUT" >> $GITHUB_ENV
           echo "EOF" >> $GITHUB_ENV
 
-          # 5. Explicitly fail the step if terraform plan failed
-          if [ $PLAN_EXIT_CODE -ne 0 ]; then
-            echo "❌ Terraform plan returned exit code $PLAN_EXIT_CODE"
-            exit $PLAN_EXIT_CODE
-          fi
+          echo "PLAN_EXIT_CODE=$PLAN_EXIT" >> $GITHUB_ENV
 
       # ==========================================
       # 5. Combined PR Comment Step
@@ -146,7 +134,6 @@ jobs:
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
-            // 1. Fetch existing PR comments to update rather than duplicate
             const { data: comments } = await github.rest.issues.listComments({
               owner: context.repo.owner,
               repo: context.repo.repo,
@@ -156,12 +143,10 @@ jobs:
               return comment.user.type === 'Bot' && comment.body.includes('## Infrastructure Validation & Plan');
             });
 
-            // 2. Read environmental variables
-            const tflintOutput = process.env.TFLINT_OUTPUT || 'No output.';
-            const trivyOutput = process.env.TRIVY_OUTPUT || 'No output.';
-            const planOutput = process.env.PLAN_OUTPUT || 'No plan generated.';
+            const tflintOutput = process.env.TFLINT_OUTPUT || 'No output step executed.';
+            const trivyOutput = process.env.TRIVY_OUTPUT || 'No output step executed.';
+            const planOutput = process.env.PLAN_OUTPUT || 'No plan step executed.';
 
-            // 3. Construct Unified Markdown Comment
             const output = `## Infrastructure Validation & Plan 🚀
 
             #### 1. 🔍 TFLint Summary
@@ -193,7 +178,6 @@ jobs:
 
             *Pusher: @${context.actor} | Event: \`${context.eventName}\`*`;
 
-            // 4. Create or Update Comment
             if (botComment) {
               await github.rest.issues.updateComment({
                 owner: context.repo.owner,
@@ -209,3 +193,34 @@ jobs:
                 body: output
               });
             }
+
+      # ==========================================
+      # 6. Evaluate PR Check Failures
+      # ==========================================
+      - name: Verify Quality Gates
+        if: always() && github.event_name == 'pull_request'
+        run: |
+          FAIL=0
+          if [ "${TFLINT_EXIT_CODE:-0}" -ne 0 ]; then
+            echo "❌ TFLint failed with exit code $TFLINT_EXIT_CODE"
+            FAIL=1
+          fi
+          if [ "${TRIVY_EXIT_CODE:-0}" -ne 0 ]; then
+            echo "❌ Trivy failed with exit code $TRIVY_EXIT_CODE"
+            FAIL=1
+          fi
+          if [ "${PLAN_EXIT_CODE:-0}" -ne 0 ]; then
+            echo "❌ Terraform Plan failed with exit code $PLAN_EXIT_CODE"
+            FAIL=1
+          fi
+
+          if [ $FAIL -ne 0 ]; then
+            exit 1
+          fi
+
+      # ==========================================
+      # 7. Terraform Apply (Runs strictly on merge to main)
+      # ==========================================
+      - name: Terraform Apply
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: terraform apply -auto-approve
