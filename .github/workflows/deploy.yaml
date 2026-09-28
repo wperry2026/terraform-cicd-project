@@ -8,7 +8,7 @@ on:
 permissions:
   id-token: write   # Required for AWS OIDC authentication
   contents: read    # Required to checkout the repository
-  pull_request: write # Required to post/update PR comments
+  pull-requests: write # Required to post/update PR comments
 
 jobs:
   terraform:
