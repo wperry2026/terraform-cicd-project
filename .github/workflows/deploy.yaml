@@ -141,9 +141,15 @@ jobs:
             echo "❌ Terraform plan returned exit code $PLAN_EXIT_CODE"
             exit $PLAN_EXIT_CODE
           fi
-
       # ==========================================
-      # 5. Combined PR Comment Step
+      # 5. Terraform Apply (Runs strictly on merge to main)
+      # ==========================================
+      - name: Terraform Apply
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: terraform apply -auto-approve
+        
+      # ==========================================
+      # 6. Combined PR Comment Step
       # ==========================================
       - name: Post Combined Scan & Plan to PR
         uses: actions/github-script@v7
