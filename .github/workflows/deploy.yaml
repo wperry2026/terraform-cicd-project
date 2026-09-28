@@ -67,17 +67,19 @@ jobs:
         id: trivy
         if: github.event_name == 'pull_request'
         run: |
-          # 1. Run Trivy and capture exit status without stopping bash immediately
-          TRIVY_EXIT_CODE=0
-          npx --yes trivy config . --severity HIGH,CRITICAL --format table --output trivy-report.txt || TRIVY_EXIT_CODE=$?
+          # 1. Install official Trivy binary
+          curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh -s -- -b /usr/local/bin
           
-          # 2. Read output into variable for PR comment  
+          # 2. Run scan and capture exit code
+          TRIVY_EXIT_CODE=0
+          trivy config . --severity HIGH,CRITICAL --format table --output trivy-report.txt || TRIVY_EXIT_CODE=$?
+          
+          # 3. Save report output for PR comment  
           TRIVY_OUT=$(cat trivy-report.txt 2>/dev/null || true)
           if [ -z "$TRIVY_OUT" ]; then
             TRIVY_OUT="✅ No HIGH or CRITICAL security vulnerabilities detected."
           fi
-
-          # 3. Store report in environment variable
+          
           echo "TRIVY_OUTPUT<<EOF" >> $GITHUB_ENV
           echo "$TRIVY_OUT" >> $GITHUB_ENV
           echo "EOF" >> $GITHUB_ENV
