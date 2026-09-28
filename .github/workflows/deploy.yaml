@@ -45,7 +45,7 @@ jobs:
         if: github.event_name == 'pull_request'
         run: |
           TFLINT_EXIT=0
-          TFLINT_OUT=$(tflint -f compact) \vert{}\vert{} TFLINT_EXIT=$?
+          TFLINT_OUT=$(tflint -f compact) || TFLINT_EXIT=$?
           
           if [ -z "$TFLINT_OUT" ]; then
             TFLINT_OUT="✅ No issues found by TFLint."
@@ -107,7 +107,7 @@ jobs:
         if: always() && github.event_name == 'pull_request'
         run: |
           PLAN_EXIT=0
-          PLAN_RAW=$(terraform plan -no-color -out=tfplan 2>&1) \vert{}\vert{} PLAN_EXIT=$?
+          PLAN_RAW=$(terraform plan -no-color -out=tfplan 2>&1) || PLAN_EXIT=$?
 
           if [ $PLAN_EXIT -eq 0 ]; then
             PLAN_OUTPUT=$(terraform show -no-color tfplan)
