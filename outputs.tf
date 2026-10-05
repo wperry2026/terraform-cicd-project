@@ -5,7 +5,7 @@ output "role_arn" {
 }
 
 output "ecr_repository_arn" {
-  value       = aws_ecr_repository.app.arn
+  value       = aws_ecr_repository.app_repo.arn
   description = "The ARN of the ECR repository"
   
 }
