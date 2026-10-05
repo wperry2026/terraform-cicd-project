@@ -1,5 +1,7 @@
-# Terraform configuration for AWS ECR repository
-resource "aws_ecr_repository" "app" {
+#---------------------------------------
+# 1. Terraform configuration for AWS ECR repository
+#---------------------------------------
+resource "aws_ecr_repository" "app_repo" {
   name                 = var.ECR_REPO_NAME
   image_tag_mutability = "IMMUTABLE"
 
@@ -19,9 +21,11 @@ resource "aws_ecr_repository" "app" {
   }
 }
 
-# This lifecycle policy will automatically expire untagged images older than 30 days, helping to manage storage costs and keep the repository clean.
+#---------------------------------------
+# 2. This lifecycle policy will automatically expire untagged images older than 30 days, helping to manage storage costs and keep the repository clean.
+#---------------------------------------
 resource "aws_ecr_lifecycle_policy" "cleanup" {
-  repository = aws_ecr_repository.app.name
+  repository = aws_ecr_repository.app_repo.name
 
   policy = jsonencode({
     rules = [{
